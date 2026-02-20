@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TracPoll — P2P Agent Voting on Trac Network</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #050810;
+    --bg2: #0a0f1e;
+    --panel: #0d1428;
+    --border: #1a2540;
+    --accent: #00f5c4;
+    --accent2: #7b5cfa;
+    --accent3: #ff6b35;
+    --text: #e8eeff;
+    --muted: #4a5580;
+    --voted: #00f5c4;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid noise bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,245,196,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,245,196,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Glow orbs */
+  .orb {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .orb1 { width: 400px; height: 400px; background: rgba(0,245,196,0.08); top: -100px; right: -100px; }
+  .orb2 { width: 300px; height: 300px; background: rgba(123,92,250,0.1); bottom: 100px; left: -80px; }
+
+  /* Header */
+  header {
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 40px;
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .logo-text {
+    font-size: 22px; font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .logo-text span { color: var(--accent); }
+
+  .status-bar {
+    display: flex; align-items: center; gap: 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .peer-dot {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Main layout */
+  main {
+    position: relative; z-index: 10;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 28px;
+  }
+
+  /* Section labels */
+  .section-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  /* Create poll panel */
+  .create-panel {
+    grid-column: 1 / 2;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 28px;
+  }
+
+  .create-panel h2 {
+    font-size: 14px; font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 20px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  input[type="text"], textarea {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 10px;
+  }
+  input[type="text"]:focus, textarea:focus {
+    border-color: var(--accent);
+  }
+  input[type="text"]::placeholder, textarea::placeholder {
+    color: var(--muted);
+  }
+
+  .options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .duration-row {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 20px;
+  }
+  .duration-row label {
+    font-size: 12px; color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    white-space: nowrap;
+  }
+  .duration-row input { margin-bottom: 0; width: 80px; }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #050810;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 12px 28px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+
+  /* Polls feed */
+  .polls-feed { grid-column: 1 / 2; }
+
+  .poll-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: border-color 0.3s;
+    animation: slideIn 0.4s ease both;
+  }
+  .poll-card:hover { border-color: rgba(0,245,196,0.3); }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .poll-card.finalized { opacity: 0.6; }
+  .poll-card.finalized .poll-badge { background: rgba(255,107,53,0.15); color: var(--accent3); border-color: rgba(255,107,53,0.3); }
+
+  .poll-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .poll-question {
+    font-size: 16px; font-weight: 600;
+    line-height: 1.4;
+    flex: 1;
+  }
+  .poll-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px; letter-spacing: 1.5px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(0,245,196,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(0,245,196,0.2);
+    margin-left: 12px;
+    white-space: nowrap;
+  }
+
+  .poll-options { display: flex; flex-direction: column; gap: 10px; }
+
+  .option-btn {
+    position: relative;
+    display: flex; align-items: center;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    overflow: hidden;
+  }
+  .option-btn:hover:not(.voted):not(.disabled) {
+    border-color: var(--accent2);
+  }
+  .option-btn.voted {
+    border-color: var(--accent);
+  }
+  .option-btn.winner {
+    border-color: var(--accent3);
+  }
+
+  .option-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: rgba(0,245,196,0.07);
+    border-radius: 9px;
+    transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+  .option-btn.winner .option-fill {
+    background: rgba(255,107,53,0.1);
+  }
+
+  .option-label {
+    position: relative; z-index: 1;
+    font-size: 13px; flex: 1;
+    color: var(--text);
+  }
+  .option-pct {
+    position: relative; z-index: 1;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: 8px;
+  }
+  .option-btn.voted .option-pct { color: var(--accent); }
+  .option-btn.winner .option-pct { color: var(--accent3); }
+
+  .checkmark {
+    position: relative; z-index: 1;
+    margin-left: 8px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .option-btn.voted .checkmark { opacity: 1; color: var(--accent); }
+  .option-btn.winner .checkmark { opacity: 1; color: var(--accent3); content: '🏆'; }
+
+  .poll-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 14px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; color: var(--muted);
+  }
+  .peer-id { 
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; max-width: 120px;
+  }
+
+  .timer-bar {
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    margin-top: 14px;
+    overflow: hidden;
+  }
+  .timer-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 1px;
+    transition: width 1s linear;
+  }
+
+  /* Sidebar */
+  .sidebar { grid-column: 2 / 3; grid-row: 1 / 3; }
+
+  .sidebar-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+
+  .sidebar-card h3 {
+    font-size: 12px; font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Peer list */
+  .peer-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .peer-item:last-child { border-bottom: none; }
+  .peer-avatar {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .peer-name {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; color: var(--text);
+    flex: 1;
+  }
+  .peer-role {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .role-admin { background: rgba(0,245,196,0.1); color: var(--accent); }
+  .role-peer { background: rgba(123,92,250,0.1); color: var(--accent2); }
+
+  /* Stats */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .stat-box {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 12px;
+    text-align: center;
+  }
+  .stat-num {
+    font-family: 'Space Mono', monospace;
+    font-size: 24px; font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-label {
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+
+  /* Activity feed */
+  .activity-item {
+    display: flex; gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(26,37,64,0.5);
+    font-size: 11px;
+  }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-time {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px; color: var(--muted);
+    white-space: nowrap; margin-top: 2px;
+  }
+  .activity-text { color: var(--text); line-height: 1.4; }
+  .activity-text strong { color: var(--accent); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 30px; right: 30px;
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 14px 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    z-index: 999;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 0 20px rgba(0,245,196,0.2);
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+
+  /* Trac branding footer */
+  footer {
+    position: relative; z-index: 10;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 2px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* Responsive */
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+    .sidebar { grid-column: 1; grid-row: auto; }
+    header { padding: 16px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">📡</div>
+    <div class="logo-text">Trac<span>Poll</span></div>
+  </div>
+  <div class="status-bar">
+    <div class="peer-dot">
+      <div class="dot"></div>
+      <span id="peer-count">7 PEERS</span>
+    </div>
+    <span>|</span>
+    <span>INTERCOM SIDECHANNEL</span>
+    <span>|</span>
+    <span style="color: var(--accent)">TRAC NETWORK</span>
+  </div>
+</header>
+
+<main>
+  <!-- Create Poll Panel -->
+  <div class="create-panel">
+    <h2>⊕ Create New Poll</h2>
+    <input type="text" id="poll-question" placeholder="What do you want to ask the network?" maxlength="120">
+    <div class="options-grid">
+      <input type="text" id="opt0" placeholder="Option A">
+      <input type="text" id="opt1" placeholder="Option B">
+      <input type="text" id="opt2" placeholder="Option C (optional)">
+      <input type="text" id="opt3" placeholder="Option D (optional)">
+    </div>
+    <div class="duration-row">
+      <label>EXPIRES IN</label>
+      <input type="text" id="duration" value="60" style="text-align:center;">
+      <label>SECONDS</label>
+    </div>
+    <button class="btn-primary" onclick="createPoll()">BROADCAST POLL →</button>
+  </div>
+
+  <!-- Active Polls Feed -->
+  <div class="polls-feed">
+    <div class="section-label">Active Polls</div>
+    <div id="polls-container"></div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <!-- Stats -->
+    <div class="sidebar-card">
+      <h3>Network Stats</h3>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-num" id="stat-polls">4</div>
+          <div class="stat-label">Polls</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-votes">89</div>
+          <div class="stat-label">Votes</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-peers">7</div>
+          <div class="stat-label">Peers</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-finalized">2</div>
+          <div class="stat-label">Finalized</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Peers -->
+    <div class="sidebar-card">
+      <h3>Connected Peers</h3>
+      <div id="peer-list">
+        <div class="peer-item">
+          <div class="peer-avatar" style="background:rgba(0,245,196,0.15);color:var(--accent)">A</div>
+          <div class="peer-name">a3f2...8d91</div>
+          <span class="peer-role role-admin">ADMIN</span>
+        </div>
+        <div class="peer-item">
+          <div class="peer-avatar" style="background:rgba(123,92,250,0.15);color:var(--accent2)">Y</div>
+          <div class="peer-name">you (local)</div>
+          <span class="peer-role role-peer">PEER</span>
+        </div>
+        <div class="peer-item">
+          <div class="peer-avatar" style="background:rgba(255,107,53,0.15);color:var(--accent3)">B</div>
+          <div class="peer-name">b7c1...2e04</div>
+          <span class="peer-role role-peer">PEER</span>
+        </div>
+        <div class="peer-item">
+          <div class="peer-avatar" style="background:rgba(0,245,196,0.1);color:var(--muted)">C</div>
+          <div class="peer-name">c9a5...f331</div>
+          <span class="peer-role role-peer">PEER</span>
+        </div>
+        <div class="peer-item">
+          <div class="peer-avatar" style="background:rgba(123,92,250,0.1);color:var(--accent2)">D</div>
+          <div class="peer-name">d0e8...7b12</div>
+          <span class="peer-role role-peer">PEER</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Feed -->
+    <div class="sidebar-card">
+      <h3>Activity Feed</h3>
+      <div id="activity-feed">
+        <div class="activity-item">
+          <div class="activity-time">just now</div>
+          <div class="activity-text"><strong>b7c1</strong> voted on "Best next feature"</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-time">12s ago</div>
+          <div class="activity-text"><strong>c9a5</strong> voted on "Preferred chain"</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-time">31s ago</div>
+          <div class="activity-text"><strong>a3f2</strong> created "Best next feature"</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-time">1m ago</div>
+          <div class="activity-text">Poll "Deploy timing" <strong>finalized</strong> → Option B</div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-time">3m ago</div>
+          <div class="activity-text"><strong>d0e8</strong> joined the network</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <a href="https://github.com/Trac-Systems/intercom" target="_blank">TRAC NETWORK</a> — TRACPOLL FORK — P2P AGENT VOTING — INTERCOM SIDECHANNEL
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ─── State ───────────────────────────────────────────────────
+  let polls = [];
+  let totalVotes = 89;
+  let totalFinalized = 2;
+
+  function uid() {
+    return Math.random().toString(36).slice(2, 10);
+  }
+
+  function fakeKey() {
+    const chars = '0123456789abcdef';
+    let s = '';
+    for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random()*16)];
+    return s + '...' + Array.from({length:4}, ()=>chars[Math.floor(Math.random()*16)]).join('');
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  // ─── Create Poll ─────────────────────────────────────────────
+  function createPoll() {
+    const q = document.getElementById('poll-question').value.trim();
+    if (!q) { showToast('⚠ Enter a question first'); return; }
+    const opts = [
+      document.getElementById('opt0').value.trim(),
+      document.getElementById('opt1').value.trim(),
+      document.getElementById('opt2').value.trim(),
+      document.getElementById('opt3').value.trim()
+    ].filter(Boolean);
+    if (opts.length < 2) { showToast('⚠ Add at least 2 options'); return; }
+    const dur = parseInt(document.getElementById('duration').value) || 60;
+
+    const poll = {
+      id: uid(),
+      question: q,
+      options: opts,
+      tally: opts.map(() => 0),
+      duration: dur,
+      startedAt: Date.now(),
+      voted: null,
+      finalized: false,
+      creator: 'you (local)',
+      creatorKey: 'local'
+    };
+    polls.unshift(poll);
+    renderPolls();
+    startTimer(poll.id);
+
+    document.getElementById('poll-question').value = '';
+    ['opt0','opt1','opt2','opt3'].forEach(id => document.getElementById(id).value = '');
+
+    document.getElementById('stat-polls').textContent = polls.length + 2;
+    showToast('📡 Poll broadcast to ' + document.getElementById('stat-peers').textContent);
+    addActivity('<strong>you</strong> created "' + q.slice(0, 30) + (q.length > 30 ? '…' : '') + '"');
+  }
+
+  // ─── Vote ────────────────────────────────────────────────────
+  function vote(pollId, optIdx) {
+    const poll = polls.find(p => p.id === pollId);
+    if (!poll || poll.voted !== null || poll.finalized) return;
+    poll.voted = optIdx;
+    poll.tally[optIdx]++;
+    totalVotes++;
+    document.getElementById('stat-votes').textContent = totalVotes;
+    renderPolls();
+    showToast('✓ Vote cast & broadcast to peers');
+    addActivity('<strong>you</strong> voted on "' + poll.question.slice(0,28) + '"');
+  }
+
+  // ─── Render Polls ────────────────────────────────────────────
+  function renderPolls() {
+    const container = document.getElementById('polls-container');
+    container.innerHTML = '';
+    polls.forEach(poll => {
+      const total = poll.tally.reduce((a, b) => a + b, 0);
+      const maxVotes = Math.max(...poll.tally, 1);
+      const elapsed = (Date.now() - poll.startedAt) / 1000;
+      const pct = Math.max(0, 1 - elapsed / poll.duration);
+      const winnerIdx = poll.finalized ? poll.tally.indexOf(maxVotes) : -1;
+
+      const card = document.createElement('div');
+      card.className = 'poll-card' + (poll.finalized ? ' finalized' : '');
+      card.innerHTML = `
+        <div class="poll-header">
+          <div class="poll-question">${escHtml(poll.question)}</div>
+          <span class="poll-badge">${poll.finalized ? 'FINALIZED' : 'LIVE'}</span>
+        </div>
+        <div class="poll-options">
+          ${poll.options.map((opt, i) => {
+            const votes = poll.tally[i];
+            const share = total > 0 ? Math.round(votes / total * 100) : 0;
+            const isVoted = poll.voted === i;
+            const isWinner = poll.finalized && i === winnerIdx;
+            return `
+              <button class="option-btn ${isVoted ? 'voted' : ''} ${isWinner ? 'winner' : ''} ${poll.voted !== null || poll.finalized ? 'disabled' : ''}"
+                onclick="vote('${poll.id}', ${i})"
+                ${poll.voted !== null || poll.finalized ? 'disabled' : ''}>
+                <div class="option-fill" style="width:${share}%"></div>
+                <span class="option-label">${escHtml(opt)}</span>
+                <span class="option-pct">${poll.voted !== null || poll.finalized ? share + '%' : ''}</span>
+                <span class="checkmark">${isWinner ? '🏆' : '✓'}</span>
+              </button>`;
+          }).join('')}
+        </div>
+        <div class="poll-footer">
+          <span class="peer-id">by ${poll.creator}</span>
+          <span>${total} vote${total !== 1 ? 's' : ''}</span>
+          <span>${poll.finalized ? 'COMMITTED TO STATE' : Math.max(0, Math.round(poll.duration - elapsed)) + 's left'}</span>
+        </div>
+        ${!poll.finalized ? `<div class="timer-bar"><div class="timer-fill" id="timer-${poll.id}" style="width:${pct*100}%"></div></div>` : ''}
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ─── Timer ───────────────────────────────────────────────────
+  function startTimer(pollId) {
+    const poll = polls.find(p => p.id === pollId);
+    if (!poll) return;
+    const tick = () => {
+      const elapsed = (Date.now() - poll.startedAt) / 1000;
+      const pct = Math.max(0, 1 - elapsed / poll.duration);
+      const el = document.getElementById('timer-' + pollId);
+      if (el) el.style.width = (pct * 100) + '%';
+      if (elapsed >= poll.duration && !poll.finalized) {
+        finalizePoll(pollId);
+      } else if (!poll.finalized) {
+        // update remaining time in footer
+        renderPolls();
+        setTimeout(tick, 1000);
+      }
+    };
+    setTimeout(tick, 1000);
+  }
+
+  function finalizePoll(pollId) {
+    const poll = polls.find(p => p.id === pollId);
+    if (!poll || poll.finalized) return;
+    poll.finalized = true;
+    totalFinalized++;
+    document.getElementById('stat-finalized').textContent = totalFinalized;
+    renderPolls();
+    const maxVotes = Math.max(...poll.tally);
+    const winnerIdx = poll.tally.indexOf(maxVotes);
+    showToast('🔒 Poll finalized → ' + poll.options[winnerIdx]);
+    addActivity('Poll "' + poll.question.slice(0,25) + '" <strong>finalized</strong> → ' + poll.options[winnerIdx]);
+  }
+
+  // ─── Activity ────────────────────────────────────────────────
+  function addActivity(html) {
+    const feed = document.getElementById('activity-feed');
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    item.innerHTML = `<div class="activity-time">just now</div><div class="activity-text">${html}</div>`;
+    feed.insertBefore(item, feed.firstChild);
+    if (feed.children.length > 8) feed.removeChild(feed.lastChild);
+  }
+
+  // ─── Simulate Peer Activity ──────────────────────────────────
+  function simulatePeerVote() {
+    const activePoll = polls.find(p => !p.finalized && p.tally.reduce((a,b)=>a+b,0) < 20);
+    if (activePoll) {
+      const randOpt = Math.floor(Math.random() * activePoll.options.length);
+      activePoll.tally[randOpt]++;
+      totalVotes++;
+      document.getElementById('stat-votes').textContent = totalVotes;
+      const peerName = fakeKey();
+      addActivity('<strong>' + peerName + '</strong> voted on "' + activePoll.question.slice(0,25) + '"');
+      renderPolls();
+    }
+  }
+
+  // ─── Seed Initial Data ───────────────────────────────────────
+  const seedPolls = [
+    {
+      question: 'Which feature should TracPoll build next?',
+      options: ['Weighted voting', 'Anonymous (ZK) votes', 'Ranked choice', 'Multi-polls'],
+      tally: [22, 18, 31, 9],
+      duration: 120,
+      creator: 'a3f2...8d91',
+      voted: null,
+      finalized: false,
+      started: -30
+    },
+    {
+      question: 'Preferred settlement chain for P2P swaps?',
+      options: ['Bitcoin Lightning', 'Solana', 'Ethereum L2', 'Trac Native'],
+      tally: [41, 17, 12, 29],
+      duration: 90,
+      creator: 'b7c1...2e04',
+      voted: null,
+      finalized: false,
+      started: -50
+    },
+    {
+      question: 'Should agents auto-vote when offline?',
+      options: ['Yes, use last preference', 'No, abstain'],
+      tally: [14, 6],
+      duration: 60,
+      creator: 'd0e8...7b12',
+      voted: 0,
+      finalized: true,
+      started: -70
+    }
+  ];
+
+  seedPolls.forEach(s => {
+    const poll = {
+      id: uid(),
+      question: s.question,
+      options: s.options,
+      tally: [...s.tally],
+      duration: s.duration,
+      startedAt: Date.now() + s.started * 1000,
+      voted: s.voted,
+      finalized: s.finalized,
+      creator: s.creator,
+      creatorKey: 'peer'
+    };
+    polls.push(poll);
+    if (!poll.finalized) startTimer(poll.id);
+  });
+
+  renderPolls();
+
+  // Simulate peers voting every few seconds
+  setInterval(simulatePeerVote, 3500);
+</script>
+
+</body>
+</html>
