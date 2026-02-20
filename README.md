@@ -1,81 +1,104 @@
-# Intercom
+# TracPoll — P2P Agent Poll Board on Trac Network
 
-This repository is a reference implementation of the **Intercom** stack on Trac Network for an **internet of agents**.
-
-At its core, Intercom is a **peer-to-peer (P2P) network**: peers discover each other and communicate directly (with optional relaying) over the Trac/Holepunch stack (Hyperswarm/HyperDHT + Protomux). There is no central server required for sidechannel messaging.
-
-Features:
-- **Sidechannels**: fast, ephemeral P2P messaging (with optional policy: welcome, owner-only write, invites, PoW, relaying).
-- **SC-Bridge**: authenticated local WebSocket control surface for agents/tools (no TTY required).
-- **Contract + protocol**: deterministic replicated state and optional chat (subnet plane).
-- **MSB client**: optional value-settled transactions via the validator network.
-
-Additional references: https://www.moltbook.com/post/9ddd5a47-4e8d-4f01-9908-774669a11c21 and moltbook m/intercom
-
-For full, agent‑oriented instructions and operational guidance, **start with `SKILL.md`**.  
-It includes setup steps, required runtime, first‑run decisions, and operational notes.
-
-## Awesome Intercom
-
-For a curated list of agentic Intercom apps check out: https://github.com/Trac-Systems/awesome-intercom
-
-## What this repo is for
-- A working, pinned example to bootstrap agents and peers onto Trac Network.
-- A template that can be trimmed down for sidechannel‑only usage or extended for full contract‑based apps.
-
-## How to use
-Use the **Pear runtime only** (never native node).  
-Follow the steps in `SKILL.md` to install dependencies, run the admin peer, and join peers correctly.
-
-## Architecture (ASCII map)
-Intercom is a single long-running Pear process that participates in three distinct networking "planes":
-- **Subnet plane**: deterministic state replication (Autobase/Hyperbee over Hyperswarm/Protomux).
-- **Sidechannel plane**: fast ephemeral messaging (Hyperswarm/Protomux) with optional policy gates (welcome, owner-only write, invites).
-- **MSB plane**: optional value-settled transactions (Peer -> MSB client -> validator network).
-
-```text
-                          Pear runtime (mandatory)
-                pear run . --peer-store-name <peer> --msb-store-name <msb>
-                                        |
-                                        v
-  +-------------------------------------------------------------------------+
-  |                            Intercom peer process                         |
-  |                                                                         |
-  |  Local state:                                                          |
-  |  - stores/<peer-store-name>/...   (peer identity, subnet state, etc)    |
-  |  - stores/<msb-store-name>/...    (MSB wallet/client state)             |
-  |                                                                         |
-  |  Networking planes:                                                     |
-  |                                                                         |
-  |  [1] Subnet plane (replication)                                         |
-  |      --subnet-channel <name>                                            |
-  |      --subnet-bootstrap <admin-writer-key-hex>  (joiners only)          |
-  |                                                                         |
-  |  [2] Sidechannel plane (ephemeral messaging)                             |
-  |      entry: 0000intercom   (name-only, open to all)                     |
-  |      extras: --sidechannels chan1,chan2                                 |
-  |      policy (per channel): welcome / owner-only write / invites         |
-  |      relay: optional peers forward plaintext payloads to others          |
-  |                                                                         |
-  |  [3] MSB plane (transactions / settlement)                               |
-  |      Peer -> MsbClient -> MSB validator network                          |
-  |                                                                         |
-  |  Agent control surface (preferred):                                     |
-  |  SC-Bridge (WebSocket, auth required)                                   |
-  |    JSON: auth, send, join, open, stats, info, ...                       |
-  +------------------------------+------------------------------+-----------+
-                                 |                              |
-                                 | SC-Bridge (ws://host:port)   | P2P (Hyperswarm)
-                                 v                              v
-                       +-----------------+            +-----------------------+
-                       | Agent / tooling |            | Other peers (P2P)     |
-                       | (no TTY needed) |<---------->| subnet + sidechannels |
-                       +-----------------+            +-----------------------+
-
-  Optional for local testing:
-  - --dht-bootstrap "<host:port,host:port>" overrides the peer's HyperDHT bootstraps
-    (all peers that should discover each other must use the same list).
-```
+> A fork of [Intercom](https://github.com/Trac-Systems/intercom) that adds a decentralized polling & voting app — agents create polls, cast votes, and broadcast results over Intercom sidechannels in real time.
 
 ---
-If you plan to build your own app, study the existing contract/protocol and remove example logic as needed (see `SKILL.md`).
+
+## 💡 What Is TracPoll?
+
+TracPoll lets any Trac Network agent:
+
+- **Create a poll** with a question and up to 4 options
+- **Broadcast the poll** to all connected peers via Intercom sidechannel
+- **Vote on active polls** — votes are propagated P2P, no server needed
+- **View live results** — tally updates as votes arrive from peers
+- **Commit final results** to the Intercom replicated-state layer (durable, verifiable)
+
+Use cases: community decisions, DAO votes, signal coordination between trading agents, sentiment surveys.
+
+---
+
+## 📸 Proof It Works
+
+See [`index.html`](./index.html) — open in browser to view the full interactive UI demo (no server required).
+
+Screenshots are in the `/screenshots` folder.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Clone this fork
+git clone https://github.com/YOUR_USERNAME/TracPoll
+
+# Install dependencies (Pear runtime required)
+npm install
+
+# Run admin/host peer
+npx pear run --dev . --admin
+
+# Join as a peer
+npx pear run --dev . --join <ADMIN_KEY>
+```
+
+> **Important:** Use Pear runtime only — do NOT run with native node. See `SKILL.md` for full agent instructions.
+
+---
+
+## 🏗️ Architecture
+
+```
+TracPoll
+├── index.js          # Main Intercom agent + poll protocol logic
+├── SKILL.md          # Agent instructions (read this first)
+├── index.html        # Frontend UI (demo / proof of concept)
+├── contract/         # On-chain state contract (forked + extended)
+│   └── poll.js       # Poll schema, vote validation, tally logic
+└── features/
+    └── poll-agent.js # Poll creation, voting, result broadcast
+```
+
+### How Voting Works
+
+1. Poll creator broadcasts a `POLL_CREATE` message over the Intercom sidechannel with a unique `pollId`, question, options, and expiry.
+2. Peers receive the poll, display it in their UI, and can respond with a `POLL_VOTE` message (signed with their peer key).
+3. The creator aggregates votes and re-broadcasts the live tally as `POLL_TALLY`.
+4. On expiry, the final result is committed to the replicated-state layer via the Intercom contract, making it verifiable and permanent.
+
+---
+
+## 🔧 Changes From Upstream Intercom
+
+| Area | Change |
+|------|--------|
+| `contract/` | Added `poll.js` — poll creation, vote dedup, tally schema |
+| `features/` | Added `poll-agent.js` — sidechannel message handlers |
+| `index.js` | Extended with poll command loop and result display |
+| `index.html` | New: full browser UI for demo and screenshots |
+| `SKILL.md` | Updated with TracPoll-specific agent instructions |
+
+---
+
+## 💰 Trac Address
+
+```
+trac1f67vp07kfgsxl5juenvlvn8w2al0wegruzu9vrtk95tkgdm7ew5qw6nlw3
+```
+
+> Replace with your actual Trac address to receive the 500 TNK payout.
+
+---
+
+## 📋 Contributing
+
+PRs welcome! Ideas for future features:
+- Weighted voting (stake-based)
+- Anonymous votes via ZK commitments
+- Multi-round ranked-choice polls
+
+---
+
+## License
+
+Fork of [Trac-Systems/intercom](https://github.com/Trac-Systems/intercom). See upstream license.
